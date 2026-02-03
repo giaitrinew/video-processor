@@ -72,16 +72,18 @@ if [ -n "$AUDIO_FILE" ] && [ -f "$AUDIO_FILE" ]; then
   echo "🎵 Replace audio bằng MP3..."
 
   ffmpeg -y \
-    -i "$FINAL_VIDEO" \
-    -stream_loop -1 -i "$AUDIO_FILE" \
-    -map 0:v:0 -map 1:a:0 \
-    -c:v libx264 -preset slow -crf 18 -pix_fmt yuv420p -profile:v high \
-    -c:a aac -b:a 192k -ar 44100 \
-    -shortest \
-    -movflags +faststart \
-    -vsync 2 -avoid_negative_ts make_zero \
-    -video_track_timescale 30 \
-    "$OUTPUT_FILE"
+  -i "$FINAL_VIDEO" \
+  -i "$AUDIO_FILE" \
+  -filter_complex "\
+    [1:a]aloop=loop=-1:size=2e+09[aud]; \
+    [aud]atrim=0:$(ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "$FINAL_VIDEO")[aud2]" \
+  -map 0:v:0 -map "[aud2]" \
+  -c:v libx264 -preset slow -crf 18 -pix_fmt yuv420p -profile:v high \
+  -c:a aac -b:a 192k -ar 44100 \
+  -movflags +faststart \
+  -vsync 2 -avoid_negative_ts make_zero \
+  -video_track_timescale 30 \
+  "$OUTPUT_FILE"
 else
   echo "👉 Không có MP3, giữ audio gốc..."
 
