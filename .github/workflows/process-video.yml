@@ -9,67 +9,92 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: jrottenberg/ffmpeg:6.0-ubuntu
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
 
-      - name: Install additional tools
+      - name: Install tools
         run: |
           apt-get update -qq
-          apt-get install -y jq curl
+          apt-get install -y curl jq
 
-      - name: Debug FFmpeg
+      - name: FFmpeg version
         run: ffmpeg -version
 
-      - name: Download Input Video & Intro
+      # -----------------------------
+      # Download video / intro / audio
+      # -----------------------------
+      - name: Download input files
         run: |
-          echo "Downloading main video..."
+          echo "⬇ Download main video..."
           curl -s -L -o input.mp4 "${{ secrets.MY_DOWNLOAD_URL }}?id=${{ github.event.client_payload.video_url }}"
 
           INTRO_URL="${{ github.event.client_payload.intro_url }}"
           if [ ! -z "$INTRO_URL" ] && [ "$INTRO_URL" != "0" ]; then
-            echo "Downloading intro..."
+            echo "⬇ Download intro..."
             curl -s -L -o intro.mp4 "${{ secrets.MY_INTRO_URL }}?id=$INTRO_URL"
           else
-            echo "No intro provided, skipping..."
+            echo "No intro"
           fi
 
-      - name: Run FFmpeg Video Processing
+          AUDIO_URL="${{ github.event.client_payload.audio_url }}"
+          if [ ! -z "$AUDIO_URL" ] && [ "$AUDIO_URL" != "0" ]; then
+            echo "⬇ Download audio mp3..."
+            curl -s -L -o audio.mp3 "$AUDIO_URL"
+          else
+            echo "No audio"
+          fi
+
+      # -----------------------------
+      # Run FFmpeg
+      # -----------------------------
+      - name: Process video
         run: |
           chmod +x process_video.sh
-          INTRO_FILE=""
-          if [ -f intro.mp4 ] && [ -s intro.mp4 ]; then
-            INTRO_FILE="intro.mp4"
-          fi
-          ./process_video.sh input.mp4 "$INTRO_FILE" "${{ github.event.client_payload.flip }}" output_final.mp4
 
-      - name: Upload Processed Video & Callback
+          INTRO_FILE=""
+          [ -s intro.mp4 ] && INTRO_FILE="intro.mp4"
+
+          AUDIO_FILE=""
+          [ -s audio.mp3 ] && AUDIO_FILE="audio.mp3"
+
+          ./process_video.sh \
+            input.mp4 \
+            "$INTRO_FILE" \
+            "${{ github.event.client_payload.flip }}" \
+            "$AUDIO_FILE" \
+            output_final.mp4
+
+      # -----------------------------
+      # Upload + callback
+      # -----------------------------
+      - name: Upload & callback
         run: |
-          echo "Uploading final video..."
+          echo "⬆ Uploading..."
           response=$(curl -s -w "%{http_code}" -o upload_response.json \
-                     -F "file=@output_final.mp4" \
-                     "${{ secrets.UPLOAD_URL }}")
-          status_code=$(printf "%s" "$response" | tail -c 3)
+            -F "file=@output_final.mp4" \
+            "${{ secrets.UPLOAD_URL }}")
+
+          code=$(printf "%s" "$response" | tail -c 3)
           body=$(cat upload_response.json)
 
-          if [ "$status_code" != "200" ]; then
-            echo "❌ Upload failed! HTTP $status_code"
+          if [ "$code" != "200" ]; then
+            echo "❌ Upload failed ($code)"
             cat upload_response.json
             exit 1
           fi
 
           output_url=$(echo "$body" | jq -r '.output_url')
-          echo "::add-mask::$output_url"
-
-          if [ "$output_url" = "null" ] || [ -z "$output_url" ]; then
-            echo "❌ Upload failed! No output_url returned."
+          if [ -z "$output_url" ] || [ "$output_url" = "null" ]; then
+            echo "❌ No output_url"
             exit 1
           fi
 
-          echo "✅ Upload thành công, link đã được mask."
+          echo "::add-mask::$output_url"
+          echo "✅ Upload OK"
 
-          echo "Sending callback..."
+          echo "📡 Callback..."
           curl -s -X POST -H "Content-Type: application/json" \
-               -d '{"job_id": "'"${{ github.event.client_payload.job_id }}"'", "output_url": "'"$output_url"'"}' \
-               "${{ secrets.CALLBACK_URL }}"
-          echo "✅ Callback sent."
+            -d '{"job_id":"${{ github.event.client_payload.job_id }}","output_url":"'"$output_url"'"}' \
+            "${{ secrets.CALLBACK_URL }}"
