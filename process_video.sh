@@ -1,77 +1,97 @@
 #!/bin/bash
 set -e
 
+# Args
 INPUT_FILE="$1"
 INTRO_FILE="$2"
 FLIP="$3"
-OUTPUT_FILE="$4"
+AUDIO_FILE="$4"
+OUTPUT_FILE="$5"
 
 if [ -z "$INPUT_FILE" ] || [ -z "$OUTPUT_FILE" ]; then
-  echo "❌ Usage: $0 input.mp4 [intro.mp4] flip output.mp4"
-  echo "   flip = 0 (bình thường), 1 (lật ngang)"
+  echo "❌ Usage:"
+  echo "  $0 input.mp4 [intro.mp4] flip [audio.mp3] output.mp4"
+  echo "  flip: 0 = normal, 1 = hflip"
   exit 1
 fi
 
 # -----------------------------
-# Bộ lọc cơ bản cho video dọc
+# Base filter cho video dọc
 # -----------------------------
 BASE_FILTER="scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2,setsar=1:1,fps=30"
 
-# Chỉ lật INPUT nếu FLIP=1
 if [ "$FLIP" -eq 1 ]; then
-  VF_FILTERS_INPUT="$BASE_FILTER,hflip"
+  VF_INPUT="$BASE_FILTER,hflip"
 else
-  VF_FILTERS_INPUT="$BASE_FILTER"
+  VF_INPUT="$BASE_FILTER"
 fi
 
-# Intro luôn không lật
-VF_FILTERS_INTRO="$BASE_FILTER"
+VF_INTRO="$BASE_FILTER"
 
 # -----------------------------
 # Encode INPUT
 # -----------------------------
 echo "🎬 Encode INPUT..."
 ffmpeg -y -i "$INPUT_FILE" \
-  -vf "$VF_FILTERS_INPUT" \
+  -vf "$VF_INPUT" \
   -c:v libx264 -preset slow -crf 18 -pix_fmt yuv420p -profile:v high \
   -c:a aac -b:a 192k -ar 44100 \
   -movflags +faststart -fflags +genpts \
   input_encoded.mp4
 
+FINAL_VIDEO="input_encoded.mp4"
+
 # -----------------------------
-# Nếu có intro, encode và nối
+# Encode + concat INTRO (nếu có)
 # -----------------------------
 if [ -n "$INTRO_FILE" ] && [ -f "$INTRO_FILE" ]; then
   echo "🎬 Encode INTRO..."
   ffmpeg -y -i "$INTRO_FILE" \
-    -vf "$VF_FILTERS_INTRO" \
+    -vf "$VF_INTRO" \
     -c:v libx264 -preset slow -crf 18 -pix_fmt yuv420p -profile:v high \
     -c:a aac -b:a 192k -ar 44100 \
     -movflags +faststart -fflags +genpts \
     intro_encoded.mp4
 
-  echo "📝 Concat list..."
+  echo "📝 Create concat list..."
   cat > list.txt <<EOF
-file 'input_encoded.mp4'
 file 'intro_encoded.mp4'
+file 'input_encoded.mp4'
 EOF
 
-  echo "🔗 Merge intro + main..."
+  echo "🔗 Concat intro + main..."
   ffmpeg -y -f concat -safe 0 -i list.txt -c copy merged_temp.mp4
 
-  echo "🎞 Final encode..."
-  ffmpeg -y -i merged_temp.mp4 \
+  FINAL_VIDEO="merged_temp.mp4"
+fi
+
+# -----------------------------
+# Final encode + AUDIO
+# -----------------------------
+if [ -n "$AUDIO_FILE" ] && [ -f "$AUDIO_FILE" ]; then
+  echo "🎵 Replace audio bằng MP3..."
+
+  ffmpeg -y \
+    -i "$FINAL_VIDEO" \
+    -stream_loop -1 -i "$AUDIO_FILE" \
+    -map 0:v:0 -map 1:a:0 \
     -c:v libx264 -preset slow -crf 18 -pix_fmt yuv420p -profile:v high \
     -c:a aac -b:a 192k -ar 44100 \
-    -movflags +faststart -fflags +genpts -vsync 2 -avoid_negative_ts make_zero -video_track_timescale 30 \
+    -shortest \
+    -movflags +faststart \
+    -vsync 2 -avoid_negative_ts make_zero \
+    -video_track_timescale 30 \
     "$OUTPUT_FILE"
 else
-  echo "👉 No intro, finalizing..."
-  ffmpeg -y -i input_encoded.mp4 \
+  echo "👉 Không có MP3, giữ audio gốc..."
+
+  ffmpeg -y -i "$FINAL_VIDEO" \
     -c:v libx264 -preset slow -crf 18 -pix_fmt yuv420p -profile:v high \
     -c:a aac -b:a 192k -ar 44100 \
-    -movflags +faststart -fflags +genpts -vsync 2 -avoid_negative_ts make_zero -video_track_timescale 30 \
+    -movflags +faststart \
+    -vsync 2 -avoid_negative_ts make_zero \
+    -video_track_timescale 30 \
     "$OUTPUT_FILE"
 fi
 
-echo "✅ Done! Output: $OUTPUT_FILE"
+echo "✅ DONE: $OUTPUT_FILE"
