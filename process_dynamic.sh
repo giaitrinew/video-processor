@@ -14,33 +14,34 @@ if [ -z "$INPUT_FILE" ] || [ -z "$OUTPUT_FILE" ]; then
 fi
 
 # ---------------------------------------------------------
-# 1. TỰ ĐỘNG LẤY BITRATE TỪ FILE GỐC (Dynamic Bitrate)
+# 1. THIẾT LẬP BITRATE SÀN (Min 8000k)
 # ---------------------------------------------------------
-# Lấy bitrate video (đơn vị bits/s)
+MIN_BITRATE_BITS=8000000 # 8000k tính bằng bits/s
+
+# Lấy bitrate gốc từ file input
 ORIGINAL_BITRATE=$(ffprobe -v error -select_streams v:0 -show_entries stream=bitrate -of default=noprint_wrappers=1:nokey=1 "$INPUT_FILE")
 
-# Nếu không lấy được bitrate (do file lỗi hoặc metadata thiếu), đặt mặc định 5000k
-if [ -z "$ORIGINAL_BITRATE" ] || [ "$ORIGINAL_BITRATE" = "N/A" ]; then
-    echo "⚠️ Không lấy được bitrate gốc, dùng mặc định 8000k"
+# Kiểm tra nếu không có bitrate hoặc bitrate thấp hơn sàn 8000k
+if [ -z "$ORIGINAL_BITRATE" ] || [ "$ORIGINAL_BITRATE" = "N/A" ] || [ "$ORIGINAL_BITRATE" -lt "$MIN_BITRATE_BITS" ]; then
+    echo "⚠️ Bitrate gốc thấp hoặc không có, ép lên sàn 8000k"
     V_BITRATE="8000k"
-    BUF_SIZE="20000k"
+    BUF_SIZE="16000k"
 else
-    # Thêm 10% để bù đắp sai số khi re-encode, đảm bảo file không bị nhẹ đi
-    V_BITRATE="$((ORIGINAL_BITRATE * 110 / 100))"
-    BUF_SIZE="$((V_BITRATE * 2 / 1000))k"
-    V_BITRATE="$((V_BITRATE / 1000))k"
+    # Nếu bitrate gốc cao hơn 8000k, lấy gốc + 10% cho nét hẳn
+    V_BITRATE="$((ORIGINAL_BITRATE * 110 / 100 / 1000))k"
+    BUF_SIZE="$((ORIGINAL_BITRATE * 2 / 1000))k"
 fi
 
-echo "📊 Original Bitrate: $ORIGINAL_BITRATE bits/s -> Target: $V_BITRATE"
+echo "📊 Target Bitrate: $V_BITRATE"
 
 # -----------------------------
-# Base filter
+# Base filter (Cố định 1080p)
 # -----------------------------
 BASE_FILTER="scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2,setsar=1:1,fps=30"
 [ "$FLIP" -eq 1 ] && VF_INPUT="$BASE_FILTER,hflip" || VF_INPUT="$BASE_FILTER"
 
 # -----------------------------
-# 2. Encode INPUT với Bitrate linh hoạt
+# 2. Encode INPUT
 # -----------------------------
 echo "🎬 Encode INPUT..."
 ffmpeg -y -i "$INPUT_FILE" \
@@ -54,7 +55,7 @@ ffmpeg -y -i "$INPUT_FILE" \
 FINAL_VIDEO="input_encoded.mp4"
 
 # -----------------------------
-# 3. Encode + concat INTRO (nếu có)
+# 3. Encode + concat INTRO (Intro sau)
 # -----------------------------
 if [ -n "$INTRO_FILE" ] && [ -f "$INTRO_FILE" ]; then
   echo "🎬 Encode INTRO..."
@@ -65,6 +66,7 @@ if [ -n "$INTRO_FILE" ] && [ -f "$INTRO_FILE" ]; then
     -c:a aac -b:a 192k -ar 44100 \
     intro_encoded.mp4
 
+  # Ghi danh sách (Video chính -> Intro)
   echo "file 'input_encoded.mp4'" > list.txt
   echo "file 'intro_encoded.mp4'" >> list.txt
 
@@ -73,7 +75,7 @@ if [ -n "$INTRO_FILE" ] && [ -f "$INTRO_FILE" ]; then
 fi
 
 # -----------------------------
-# 4. Final encode + AUDIO (Duy trì Bitrate)
+# 4. Final encode + AUDIO
 # -----------------------------
 if [ -n "$AUDIO_FILE" ] && [ -f "$AUDIO_FILE" ]; then
   echo "🎵 Replace audio & Finalizing..."
@@ -88,7 +90,7 @@ if [ -n "$AUDIO_FILE" ] && [ -f "$AUDIO_FILE" ]; then
     -movflags +faststart -vsync 2 \
     "$OUTPUT_FILE"
 else
-  # Nén lại lần cuối để đảm bảo metadata sạch
+  # Nén lại lần cuối để đồng bộ bitrate sàn
   ffmpeg -y -i "$FINAL_VIDEO" \
     -c:v libx264 -b:v "$V_BITRATE" -maxrate "$V_BITRATE" -bufsize "$BUF_SIZE" \
     -preset slow -c:a copy "$OUTPUT_FILE"
