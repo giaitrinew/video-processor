@@ -28,7 +28,7 @@ jobs:
       - name: Download input files
         run: |
           echo "⬇ Download main video..."
-          curl -s -L -o input.mp4 "${{ secrets.MY_DOWNLOAD_URL }}?id=${{ github.event.client_payload.video_url }}"
+          curl -s -L -o input.mp4 "${{ secrets.MY_DOWNLOAD_URL }}?id=${{ github.event.client_payload.video_url }}&raw=1"
 
           INTRO_URL="${{ github.event.client_payload.intro_url }}"
           if [ ! -z "$INTRO_URL" ] && [ "$INTRO_URL" != "0" ]; then
