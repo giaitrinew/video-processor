@@ -51,7 +51,7 @@ jobs:
       # -----------------------------
       - name: Process video
         run: |
-          chmod +x process_video.sh
+          chmod +x process_dynamic.sh
 
           INTRO_FILE=""
           [ -s intro.mp4 ] && INTRO_FILE="intro.mp4"
@@ -59,7 +59,7 @@ jobs:
           AUDIO_FILE=""
           [ -s audio.mp3 ] && AUDIO_FILE="audio.mp3"
 
-          ./process_video.sh \
+          ./process_dynamic.sh \
             input.mp4 \
             "$INTRO_FILE" \
             "${{ github.event.client_payload.flip }}" \
