@@ -21,7 +21,7 @@ jobs:
       - name: Install tools
         run: |
           sudo apt-get update -y
-          sudo apt-get install -y jq curl
+          sudo apt-get install -y jq curl ffmpeg
 
       # -----------------------------
       # Check FFmpeg (có sẵn trên runner)
